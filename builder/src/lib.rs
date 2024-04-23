@@ -47,12 +47,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 self
             }
 
-            pub fn build(self) -> Result<#name, Box<dyn std::error::Error>> {
+            pub fn build(&self) -> Result<#name, Box<dyn std::error::Error>> {
                 Ok(#name{
-                    executable: self.executable.expect("expected an executable"),
-                    args: self.args.expect("expected an args"),
-                    env: self.env.expect("expected an env"),
-                    current_dir: self.current_dir.expect("expected an current_dir"),
+                    executable: self.executable.clone().expect("expected an executable"),
+                    args: self.args.clone().expect("expected an args"),
+                    env: self.env.clone().expect("expected an env"),
+                    current_dir: self.current_dir.clone().expect("expected an current_dir"),
                 })
             }
         }
