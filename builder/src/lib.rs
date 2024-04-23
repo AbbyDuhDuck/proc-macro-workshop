@@ -7,55 +7,70 @@ pub fn derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
 
-    let name = input.ident;
+    let name = &input.ident;
     let builder = syn::Ident::new(&format!("{}Builder", name), name.span());
 
-    // Build the output, possibly using quasi-quotation
-    let expanded = quote! {
+    let fields =
+    if let syn::Data::Struct(data) = &input.data {
+        &data.fields
+    } else { panic!() };
+
+    let attr: Vec<syn::Ident> = fields.iter()
+        .map(|f| f.ident.to_owned().unwrap() )
+        .collect();
+
+    let attr_seg: Vec<syn::PathSegment> = fields.iter()
+        .map(|f| if let syn::Type::Path(ty) = &f.ty {
+            ty.path.segments[0].to_owned()
+        } else { panic!() })
+        .collect();
+
+    let attr_str: Vec<String> = attr.iter()
+        .map(|ident| ident.to_string() )
+        .collect();
+
+    let block_impl = quote! {
         impl #name {
             fn builder() -> #builder {
                 #builder {
-                    executable: None,
-                    args: None,
-                    env: None,
-                    current_dir: None,
+                    #( #attr : None ),*
                 }
             }
         }
+    };
 
+    let block_builder = quote! {
         pub struct #builder {                
-            executable: Option<String>,
-            args: Option<Vec<String>>,
-            env: Option<Vec<String>>,
-            current_dir: Option<String>,
+            #( #attr: Option<#attr_seg> ),*
         }
+    };
+
+    let block_impl_builder = quote! {
         impl #builder {
-            fn executable(&mut self, executable: String) -> &mut Self {
-                self.executable = Some(executable);
-                self
-            }
-            pub fn args(&mut self, args: Vec<String>) -> &mut Self { 
-                self.args = Some(args);
-                self
-            }
-            pub fn env(&mut self, env: Vec<String>) -> &mut Self {
-                self.env = Some(env);
-                self
-            }
-            pub fn current_dir(&mut self, current_dir: String) -> &mut Self {
-                self.current_dir = Some(current_dir);
-                self
-            }
+            #(
+                fn #attr(&mut self, #attr: #attr_seg) -> &mut Self {
+                    self.#attr = Some(#attr);
+                    self
+                }
+            )*
 
             pub fn build(&self) -> Result<#name, Box<dyn std::error::Error>> {
                 Ok(#name{
-                    executable: self.executable.clone().expect("expected an executable"),
-                    args: self.args.clone().expect("expected an args"),
-                    env: self.env.clone().expect("expected an env"),
-                    current_dir: self.current_dir.clone().expect("expected an current_dir"),
+                    #(
+                        #attr : self.#attr
+                            .clone()
+                            .expect(&format!("Expected {} but found nothing.", #attr_str))
+                    ),*
                 })
             }
         }
+    };
+
+    // Build the output, possibly using quasi-quotation
+    let expanded = quote! {
+        #block_impl  
+        #block_builder
+        #block_impl_builder
     };
 
     // Hand the output tokens back to the compiler
