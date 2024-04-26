@@ -4,15 +4,45 @@ use proc_macro2::TokenTree;
 use quote::quote;
 use syn::{parse_macro_input, AngleBracketedGenericArguments, DeriveInput, PathSegment};
 
-// #[proc_macro_derive(Builder)]
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
-    // Parse the input tokens into a syntax tree
-    let input = parse_macro_input!(input as DeriveInput);
+    //! This macro generates the boilerplate code involved in implementing the [builder
+    //! pattern] in Rust. Builders are a mechanism for instantiating structs, especially
+    //! structs with many fields, and especially if many of those fields are optional or
+    //! the set of fields may need to grow backward compatibly over time.
+    //! 
+    //! [builder pattern]: https://en.wikipedia.org/wiki/Builder_pattern
+    //! 
+    //! ---
+    //! 
+    //! ## Example Use
+    //! 
+    //! ```
+    //! use derive_builder::Builder;
+    //! 
+    //! #[derive(Builder)]
+    //! pub struct Command {
+    //!     executable: String,
+    //!     #[builder(each = "arg")]
+    //!     args: Vec<String>,
+    //!     current_dir: Option<String>,
+    //! }
+    //! 
+    //! fn main() {
+    //!     let command = Command::builder()
+    //!         .executable("cargo".to_owned())
+    //!         .arg("build".to_owned())
+    //!         .arg("--release".to_owned())
+    //!         .build()
+    //!         .unwrap();
+    //!     assert_eq!(command.executable, "cargo");
+    //! }
+    //! ```
+   
+    // -=-=- Helper Functions -=-=- //
 
-    let name = &input.ident;
-    let builder = syn::Ident::new(&format!("{}Builder", name), name.span());
-
+    // Function to get the inner type of a `syn::Type` and panic! if it doesn't find one.
+    // Note: you should check your type before traversing
     let get_inner_type = |ty: &syn::Type, sub_ty: usize| {
         if let syn::Type::Path(ref p) = ty {
             let PathSegment {arguments, ..} = p.path.segments.last().unwrap();
@@ -25,6 +55,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         } else { panic!() }
     };
 
+    // Check if a syn:Type has the ident == to string `s`
     let ty_is_type = |ty: &syn::Type, s: &str| {
         if let syn::Type::Path(ref p) = ty {
             p.path.segments.last().unwrap().ident == s
@@ -32,6 +63,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
             false
         }
     };
+    // Check if a syn::Type is an Option<...> and return the inner type or None 
     let ty_is_option = |ty: &syn::Type| {
         if let syn::Type::Path(ref p) = ty {
             if (
@@ -52,14 +84,17 @@ pub fn derive(input: TokenStream) -> TokenStream {
         } else { None }
     };
 
+    // Make a standardized attr error and pass the tokens for the span
     let make_attr_error = |t: &dyn quote::ToTokens| {
         syn::Error::new_spanned(t, "expected `builder(each = \"...\")`").to_compile_error()
     };
 
+    // check if an attr is a builder
+    // returns (ident: Option<syn::Ident>, err: Option<TokenStream>)
+    // it is a properly formatted builder `if let (Some(_), _) = attr_is_builder(&attr)`
     let attr_is_builder = |attr: &syn::Attribute| {
         if let syn::Meta::List(ref list) = attr.meta {
             if list.path.segments.len() == 1 && list.path.segments[0].ident == "builder" {
-                // TODO from here
                 let mut tokens = list.tokens.to_owned().into_iter();
                 
                 match tokens.next().unwrap() {
@@ -88,6 +123,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
         };
         (None, None)
     };
+    // check if an [attr] has a builder attr
+    // returns (ident: Option<syn::Ident>, err: Option<TokenStream>) if either is Some
+    // it has a properly formatted builder `if let (Some(_), _) = attr_has_builder(&attrs)`
     let attr_has_builder = |attrs| {
         for attr in attrs {
             let (i, e) = attr_is_builder(attr);
@@ -96,14 +134,31 @@ pub fn derive(input: TokenStream) -> TokenStream {
         (None, None)
     };
 
-    
+    // -=-=- impl derive for Builder -=-=- //
 
+    // Parse the input tokens into a syntax tree
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // ident names for structs
+    let name = &input.ident;
+    let builder = syn::Ident::new(&format!("{}Builder", name), name.span());
+
+    // get the structs fields to operate on.
     let fields =
     if let syn::Data::Struct(data) = &input.data {
         &data.fields
     } else { panic!() };
 
-    // -=-=- Impl struct -=-=-
+    // -=-=- Err Check -=-=- //
+
+    for field in fields {
+        // check if there is a parser error 
+        if let (_, Some(err)) = attr_has_builder(&field.attrs) {
+            return err.into();
+        }
+    }
+
+    // -=-=- Impl struct -=-=- //
 
     let impl_fields = fields.iter().map(|f| {
         let name = &f.ident;
@@ -121,7 +176,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     };
 
-    // -=-=- define Builder struct -=-=- //
+    // -=-=- define struct Builder -=-=- //
 
     let builder_fields = fields.iter().map(|f| {
         let name = &f.ident;
@@ -142,35 +197,38 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     // -=-=- impl Builder -=-=- //
 
+    // build the Builder functions for setting the full named value for the attr passed.
     let impl_builder_fields = fields.iter().filter_map(|f| {
+        // field name
         let name = &f.ident.to_owned().unwrap();
+        // field type
         let ty = match ty_is_option(&f.ty) {
             Some(inner_ty) => inner_ty,
             None => f.ty.to_owned()
         };
 
-        let (maybe_ident, err) = attr_has_builder(&f.attrs);
-        if let Some(err) = err { return Some(err) }
-        
-        if let Some(ref ident) = maybe_ident {
+        // if attr has `builder(each = "...")` and no name conflict then build setter
+        if let (Some(ref ident), _) = attr_has_builder(&f.attrs) {
             if ident == name { return None; }
             // -=-=- //
-
-            return Some( quote! {
+            return Some(quote! {
                 fn #name(&mut self, #name: #ty) -> &mut Self {
                     self.#name = #name;
                     self
                 }
-            } );
+            });
         }
 
-        Some( quote! {
+        // else build generic setter
+        Some(quote! {
             fn #name(&mut self, #name: #ty) -> &mut Self {
                 self.#name = Some(#name);
                 self
             }
-        } )
+        })
     });
+
+    // build the object fields for the `build()` function.
     let impl_builder_build_fields = fields.iter().map(|f| {
         let name = &f.ident;
         if ty_is_option(&f.ty).is_some() || attr_has_builder(&f.attrs).0.is_some() {
@@ -183,6 +241,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
     });
+    
+    // build the extenc methods for all the `builder(each = "...")` attributes.
     let impl_extend_methods = fields.iter().filter_map(|f| {
         for attr in &f.attrs {
             if let (Some(arg), _) = attr_is_builder(&attr) {
@@ -201,11 +261,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
         None
     });
+
+    // the `build()` function
     let impl_builder_build = quote! {
         pub fn build(&self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
             std::result::Result::Ok(#name{ #( #impl_builder_build_fields ),* })
     }
     };
+
+    // impl the whole builder
     let block_impl_builder = quote! {
         impl #builder {
             #( #impl_builder_fields )*
@@ -217,7 +281,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     // -=-=- Output -=-=- //
 
-    // Build the output, possibly using quasi-quotation
+    // Build the output using the other blocks
     let expanded = quote! {
         #block_impl  
         #block_builder
