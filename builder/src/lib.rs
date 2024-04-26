@@ -202,8 +202,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
         None
     });
     let impl_builder_build = quote! {
-        pub fn build(&self) -> Result<#name, Box<dyn std::error::Error>> {
-            Ok(#name{ #( #impl_builder_build_fields ),* })
+        pub fn build(&self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
+            std::result::Result::Ok(#name{ #( #impl_builder_build_fields ),* })
     }
     };
     let block_impl_builder = quote! {
