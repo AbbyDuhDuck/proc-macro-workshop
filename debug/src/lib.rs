@@ -1,8 +1,9 @@
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse_macro_input;
 
-#[proc_macro_derive(CustomDebug)]
+#[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as syn::DeriveInput);
@@ -16,12 +17,22 @@ pub fn derive(input: TokenStream) -> TokenStream {
     if let syn::Data::Struct(data) = &input.data {
         &data.fields
     } else { panic!() };
+    
+    // -=-=- Err Check -=-=- //
+
+    for _field in fields {
+        // if attr parsing has error => raise the error
+        continue;
+    }
+
+    // -=-=- Generate Output -=-=- //
 
     let debug_fields = fields.iter().map(|field| {
         let name = &field.ident;
 
         quote! { .field(stringify!(#name), &self.#name) }
     });
+
 
     let output_tokens = quote! {
         impl std::fmt::Debug for #struct_name {
