@@ -52,6 +52,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
         } else { None }
     };
 
+    let make_attr_error = |t: &dyn quote::ToTokens| {
+        syn::Error::new_spanned(t, "expected `builder(each = \"...\")`").to_compile_error()
+    };
+
     let attr_is_builder = |attr: &syn::Attribute| {
         if let syn::Meta::List(ref list) = attr.meta {
             if list.path.segments.len() == 1 && list.path.segments[0].ident == "builder" {
@@ -59,38 +63,37 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 let mut tokens = list.tokens.to_owned().into_iter();
                 
                 match tokens.next().unwrap() {
-                    TokenTree::Ident(ref i) => assert_eq!(i, "each"),
-                    tt => panic!("expected 'each', found '{tt}'"), 
+                    TokenTree::Ident(ref i) => if i != "each" { return (None, Some(make_attr_error(list)) ) },
+                    _ => return (None, Some(make_attr_error(list)) ), 
                 } // assert `each``
 
                 match tokens.next().unwrap() {
-                    TokenTree::Punct(ref p) => assert_eq!(p.as_char(), '='),
-                    tt => panic!("expected 'each', found '{tt}'"),
+                    TokenTree::Punct(ref p) => if p.as_char() != '=' { return (None, Some(make_attr_error(list)) ) },
+                    _ => return (None, Some(make_attr_error(list)) ), 
                 } // assert `=`
 
                 let lit = match tokens.next().unwrap() {
                     TokenTree::Literal(l) => l,
-                    tt => panic!("expected string, found '{tt}'"),
+                    _ => return (None, Some(make_attr_error(list)) ),
                 }; // assert literal
 
                 match syn::Lit::new(lit) {
                     syn::Lit::Str(s) => {
-                        return Some( syn::Ident::new(&s.value(), s.span()) )
+                        return (Some(syn::Ident::new(&s.value(), s.span())), None)
                     },
-                    lit => panic!("expected string, found '{lit:?}'"),
+                    _ => return (None, Some(make_attr_error(list)) ),
                 } // assert literal string
             }
-            return None
+            return (None, None)
         };
-        None
+        (None, None)
     };
     let attr_has_builder = |attrs| {
         for attr in attrs {
-            if let Some(i) = attr_is_builder(attr) {
-                return Some(i)
-            }
+            let (i, e) = attr_is_builder(attr);
+            if i.is_some() || e.is_some() { return (i, e) }
         }
-        None
+        (None, None)
     };
 
     
@@ -104,7 +107,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let impl_fields = fields.iter().map(|f| {
         let name = &f.ident;
-        if let Some(_) = attr_has_builder(&f.attrs) {
+        if let (Some(_), _) = attr_has_builder(&f.attrs) {
             if !ty_is_type(&f.ty, "Vec") { panic!("expected 'Vec' fround {:?}", f.ty) }
             return quote! { #name: vec![] };
         }
@@ -125,7 +128,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         let ty = &f.ty;
         if let Some(ty) = ty_is_option(ty) {
             quote! { #name: std::option::Option<#ty> }
-        } else if attr_has_builder(&f.attrs).is_some() {
+        } else if let (Some(_), _) = attr_has_builder(&f.attrs) {
             quote! { #name: #ty }
         } else {
             quote! { #name: std::option::Option<#ty> }
@@ -145,8 +148,11 @@ pub fn derive(input: TokenStream) -> TokenStream {
             Some(inner_ty) => inner_ty,
             None => f.ty.to_owned()
         };
+
+        let (maybe_ident, err) = attr_has_builder(&f.attrs);
+        if let Some(err) = err { return Some(err) }
         
-        if let Some(ref ident) = attr_has_builder(&f.attrs) {
+        if let Some(ref ident) = maybe_ident {
             if ident == name { return None; }
             // -=-=- //
 
@@ -167,7 +173,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     });
     let impl_builder_build_fields = fields.iter().map(|f| {
         let name = &f.ident;
-        if ty_is_option(&f.ty).is_some() || attr_has_builder(&f.attrs).is_some() {
+        if ty_is_option(&f.ty).is_some() || attr_has_builder(&f.attrs).0.is_some() {
             quote! {
                 #name : self.#name.clone()
             }
@@ -179,7 +185,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     });
     let impl_extend_methods = fields.iter().filter_map(|f| {
         for attr in &f.attrs {
-            if let Some(arg) = attr_is_builder(&attr) {
+            if let (Some(arg), _) = attr_is_builder(&attr) {
                 if !ty_is_type(&f.ty, "Vec") { panic!("expected 'Vec' fround {:?}", f.ty) }
                 // -=-=- //
                 let name = &f.ident;
