@@ -46,8 +46,29 @@ pub fn derive(input: TokenStream) -> TokenStream {
         None
     };
 
-    // -=-=- THING -=-=- //
+    let in_where_stmt = |generics: syn::GenericArgument| {
+        let (_, _, maybe_where_clause) = generics.split_for_impl();
+        if maybe_where_clause.is_none() { return None; }
+    
+        let predicates = if let Some(where_clause) = maybe_where_clause {
+            let predicates = where_clause.predicates.iter().map(|predicate| {
+                match predicate {
+                    syn::WherePredicate::Type(ty) => {
+                        eprintln!("TYPE {:#?}", ty);
+                        quote! { #ty + std::fmt::Debug }
+                    },
+                    syn::WherePredicate::Lifetime(li) => quote! { #li }, 
+                    predicate => panic!("PANICING! FOUND {predicate:?}"),
+                }
+            });
+            Some( quote! { #(#predicates),* } )
+        } else { None };
 
+        None
+    };
+
+    // -=-=- THING -=-=- //
+    
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as syn::DeriveInput);
     // eprintln!("{:#?}", input.generics);
@@ -97,26 +118,19 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     });
     let struct_where_stmt = if input.generics.params.is_empty() { None } else {
-        let (_, _, where_clause) = input.generics.split_for_impl();
+        let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+        
+        let _ = in_where_stmt(input.generics);
+
+        // let generics = ty_generics.
+
         // let generics = struct_generic_types.to_owned();
 
-        // eprintln!("{:#?}", where_clause);
+        eprintln!("{:#?}", impl_generics);
+        eprintln!("{:#?}", ty_generics);
+        eprintln!("{:#?}", where_clause);
 
-        let predicates = if let Some(where_clause) = where_clause {
-            let predicates = where_clause.predicates.iter().map(|predicate| {
-                match predicate {
-                    syn::WherePredicate::Type(ty) => {
-                        eprintln!("TYPE {:#?}", ty);
-                        quote! { #ty + std::fmt::Debug }
-                    },
-                    syn::WherePredicate::Lifetime(li) => quote! { #li }, 
-                    predicate => panic!("PANICING! FOUND {predicate:?}"),
-                }
-            });
-            Some( quote! { #(#predicates),* } )
-        } else { None };
-
-        Some(quote! { where #predicates })
+        Some(quote! { /*...*/ })
     };
 
     let (impl_generics, ty_generics, _where_clause) = input.generics.split_for_impl();
