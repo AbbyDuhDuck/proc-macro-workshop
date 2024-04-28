@@ -50,6 +50,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as syn::DeriveInput);
+    // eprintln!("{:#?}", input.generics);
 
     // ident names for structs
     let struct_name = &input.ident;
@@ -89,9 +90,43 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     });
 
+    let _struct_generic_types = &input.generics.params.iter().filter(|generic| {
+        match generic {
+            syn::GenericParam::Type(_) => true,
+            _ => false,
+        }
+    });
+    let struct_where_stmt = if input.generics.params.is_empty() { None } else {
+        let (_, _, where_clause) = input.generics.split_for_impl();
+        // let generics = struct_generic_types.to_owned();
+
+        // eprintln!("{:#?}", where_clause);
+
+        let predicates = if let Some(where_clause) = where_clause {
+            let predicates = where_clause.predicates.iter().map(|predicate| {
+                match predicate {
+                    syn::WherePredicate::Type(ty) => {
+                        eprintln!("TYPE {:#?}", ty);
+                        quote! { #ty + std::fmt::Debug }
+                    },
+                    syn::WherePredicate::Lifetime(li) => quote! { #li }, 
+                    predicate => panic!("PANICING! FOUND {predicate:?}"),
+                }
+            });
+            Some( quote! { #(#predicates),* } )
+        } else { None };
+
+        Some(quote! { where #predicates })
+    };
+
+    let (impl_generics, ty_generics, _where_clause) = input.generics.split_for_impl();
+    // eprintln!("{:#?}\n{:#?}\n{:#?}", impl_generics, ty_generics, where_clause);
 
     let output_tokens = quote! {
-        impl std::fmt::Debug for #struct_name {
+        impl #impl_generics std::fmt::Debug for #struct_name #ty_generics
+        #struct_where_stmt
+
+        {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{} {{ ", stringify!(#struct_name))?;
                 #( #debug_fields )*
