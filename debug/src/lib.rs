@@ -46,25 +46,38 @@ pub fn derive(input: TokenStream) -> TokenStream {
         None
     };
 
-    let in_where_stmt = |generics: syn::GenericArgument| {
-        let (_, _, maybe_where_clause) = generics.split_for_impl();
-        if maybe_where_clause.is_none() { return None; }
-    
-        let predicates = if let Some(where_clause) = maybe_where_clause {
-            let predicates = where_clause.predicates.iter().map(|predicate| {
-                match predicate {
-                    syn::WherePredicate::Type(ty) => {
-                        eprintln!("TYPE {:#?}", ty);
-                        quote! { #ty + std::fmt::Debug }
-                    },
-                    syn::WherePredicate::Lifetime(li) => quote! { #li }, 
-                    predicate => panic!("PANICING! FOUND {predicate:?}"),
-                }
-            });
-            Some( quote! { #(#predicates),* } )
-        } else { None };
+    let in_where_stmt = |
+        param: &syn::GenericParam,
+        where_clause: &std::option::Option<&syn::WhereClause>
+    | {
+        if where_clause.is_none() { return None; }
+        let where_clause = where_clause.unwrap();
 
-        None
+        for predicate in &where_clause.predicates {
+            match predicate {
+                syn::WherePredicate::Type(ty) => {
+                    if let syn::GenericParam::Type(ty_param) = param {
+                        if let syn::Type::Path(syn::TypePath{path, ..}) = &ty.bounded_ty {
+                            if let Some(syn::PathSegment{ident, ..}) = path.segments.iter().last() {
+                                if ident == &ty_param.ident {
+                                    return Some(predicate.to_owned());
+                                }
+                            }
+                        }
+                    }
+                },
+                syn::WherePredicate::Lifetime(li) => {
+                    if let syn::GenericParam::Lifetime(li_param) = param {
+                        if li.lifetime.ident == li_param.lifetime.ident {
+                            return Some(predicate.to_owned());
+                        }
+                    }
+                }, 
+                predicate => panic!("PANICING! FOUND {predicate:?}"),
+            }
+
+        }
+    None
     };
 
     // -=-=- THING -=-=- //
@@ -118,24 +131,31 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     });
     let struct_where_stmt = if input.generics.params.is_empty() { None } else {
-        let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+        let (_, _, where_clause) = input.generics.split_for_impl();
         
-        let _ = in_where_stmt(input.generics);
+        let predicates = input.generics.params.iter().filter_map(|param| {
+            if let Some(predicate) = in_where_stmt(param, &where_clause) {
+                match predicate {
+                    syn::WherePredicate::Lifetime(li) => return Some(quote! { #li }),
+                    syn::WherePredicate::Type(ty) => return Some(quote! {
+                        #ty + std::fmt::Debug
+                    }),
+                    _ => {},
+                }
+            };
+            if let syn::GenericParam::Type(ty) = param {
+                return Some(quote! {
+                    #ty: std::fmt::Debug
+                });
+            }
+            None
+        });
 
-        // let generics = ty_generics.
-
-        // let generics = struct_generic_types.to_owned();
-
-        eprintln!("{:#?}", impl_generics);
-        eprintln!("{:#?}", ty_generics);
-        eprintln!("{:#?}", where_clause);
-
-        Some(quote! { /*...*/ })
+        Some(quote! { where #(#predicates),* })
     };
 
-    let (impl_generics, ty_generics, _where_clause) = input.generics.split_for_impl();
-    // eprintln!("{:#?}\n{:#?}\n{:#?}", impl_generics, ty_generics, where_clause);
-
+    let (impl_generics, ty_generics, _) = input.generics.split_for_impl();
+    
     let output_tokens = quote! {
         impl #impl_generics std::fmt::Debug for #struct_name #ty_generics
         #struct_where_stmt
