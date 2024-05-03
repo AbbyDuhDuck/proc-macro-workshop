@@ -46,7 +46,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         None
     };
 
-    let in_where_stmt = |
+    let _in_where_stmt = |
         param: &syn::GenericParam,
         where_clause: &std::option::Option<&syn::WhereClause>
     | {
@@ -131,24 +131,29 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     });
     let struct_where_stmt = if input.generics.params.is_empty() { None } else {
-        let (_, _, where_clause) = input.generics.split_for_impl();
+        // let (_, _, where_clause) = input.generics.split_for_impl();
         
-        let predicates = input.generics.params.iter().filter_map(|param| {
-            if let Some(predicate) = in_where_stmt(param, &where_clause) {
-                match predicate {
-                    syn::WherePredicate::Lifetime(li) => return Some(quote! { #li }),
-                    syn::WherePredicate::Type(ty) => return Some(quote! {
-                        #ty + std::fmt::Debug
-                    }),
-                    _ => {},
-                }
-            };
-            if let syn::GenericParam::Type(ty) = param {
-                return Some(quote! {
-                    #ty: std::fmt::Debug
-                });
-            }
-            None
+        // let predicates = input.generics.params.iter().filter_map(|param| {
+        //     if let Some(predicate) = in_where_stmt(param, &where_clause) {
+        //         match predicate {
+        //             syn::WherePredicate::Lifetime(li) => return Some(quote! { #li }),
+        //             syn::WherePredicate::Type(ty) => return Some(quote! {
+        //                 #ty + std::fmt::Debug
+        //             }),
+        //             _ => {},
+        //         }
+        //     };
+        //     if let syn::GenericParam::Type(ty) = param {
+        //         return Some(quote! {
+        //             #ty: std::fmt::Debug
+        //         });
+        //     }
+        //     None
+        // });
+
+        let predicates = fields.iter().map(|field| {
+            let ty = &field.ty;
+            quote! { #ty: std::fmt::Debug }
         });
 
         Some(quote! { where #(#predicates),* })
