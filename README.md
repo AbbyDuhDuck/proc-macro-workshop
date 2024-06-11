@@ -10,6 +10,21 @@ by other authors.*
 
 <br>
 
+## Progress
+
+- [**Derive macro:** `derive(Builder)`](#derive-macro-derivebuilder)
+  - Complete (with docs)
+- [**Derive macro:** `derive(CustomDebug)`](#derive-macro-derivecustomdebug)
+  - Test 5 - Pass
+- [**Function-like macro:** `seq!`](#function-like-macro-seq)
+  - Started
+- [**Attribute macro:** `#[sorted]`](#attribute-macro-sorted)
+  - Not Started
+- [**Attribute macro:** `#[bitfield]`](#attribute-macro-bitfield)
+  - Not Started
+
+<br>
+
 ## Contents
 
 - [**Suggested prerequisites**](#suggested-prerequisites)
